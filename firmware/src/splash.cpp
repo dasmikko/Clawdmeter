@@ -472,13 +472,20 @@ static const uint16_t MAS_STILL_MS_BY_RATE[4] = { 10000, 7000, 5000, 3500 };
 // loop is held for as long as Claude keeps working); waiting → he keeps
 // waving / pointing at you until you answer.
 static const char* MAS_ACTS_WORKING[4] = { "laptop", NULL, NULL, NULL };
+// The laptop is 34 cells wide; on narrower panels it runs into the centered
+// screen title, so those boards dance instead.
+static const char* MAS_ACTS_WORKING_NARROW[4] = { "dancing", NULL, NULL, NULL };
 static const char* MAS_ACTS_WAITING[4] = { "waving", "pointing", NULL, NULL };
 #define MAS_STILL_MS_WORKING 800
 #define MAS_STILL_MS_WAITING 1200
 
 static const char* const* mas_acts(uint32_t *still_ms) {
     switch (claude_state_get()) {
-    case CLAUDE_WORKING: *still_ms = MAS_STILL_MS_WORKING; return MAS_ACTS_WORKING;
+    case CLAUDE_WORKING:
+        *still_ms = MAS_STILL_MS_WORKING;
+        // Keep the art in the left ~30% of the width, clear of the title.
+        return (mas_slot_x + 34 * mas_cell <= mas_screen_w * 3 / 10)
+            ? MAS_ACTS_WORKING : MAS_ACTS_WORKING_NARROW;
     case CLAUDE_WAITING: *still_ms = MAS_STILL_MS_WAITING; return MAS_ACTS_WAITING;
     default: break;
     }
@@ -907,6 +914,8 @@ void splash_request_repick(void) {
 }
 
 bool splash_is_active(void) { return active; }
+
+bool splash_draws_direct(void) { return SPLASH_DIRECT_DRAW; }
 
 void splash_show(void) {
     splash_pick_for_current_rate();   // select animation; direct path defers the draw

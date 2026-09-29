@@ -1,6 +1,8 @@
 #include "ui.h"
 #include "splash.h"
 #include "claude_state.h"
+#include "now_playing.h"
+#include "idle.h"
 #include <lvgl.h>
 #include <time.h>
 #include "logo.h"
@@ -314,6 +316,7 @@ static void format_reset_time(int mins, char* buf, size_t len) {
 
 // Forward decls — callbacks defined near ui_show_screen below
 static void global_click_cb(lv_event_t* e);
+static void toast_click_cb(lv_event_t* e);
 
 static lv_obj_t* make_panel(lv_obj_t* parent, int x, int y, int w, int h) {
     lv_obj_t* panel = lv_obj_create(parent);
@@ -563,6 +566,7 @@ void ui_init(void) {
     if (splash_get_root()) {
         lv_obj_add_event_cb(splash_get_root(), global_click_cb, LV_EVENT_CLICKED, NULL);
     }
+    now_playing_init(scr, global_click_cb, toast_click_cb);
 
     // Corner mascot in the old logo slot. The still Clawd is shorter than the
     // 80/40 px slot the spark logo used; center it vertically in that slot.
@@ -700,6 +704,7 @@ static void update_view_state(void) {
 }
 
 void ui_tick_anim(void) {
+    now_playing_tick();
     if (current_screen != SCREEN_USAGE) return;
     update_view_state();
     if (view_state == 1) splash_mini_tick();   // animate the sleeping creature on the idle screen
@@ -769,28 +774,46 @@ void ui_tick_anim(void) {
     lv_obj_set_style_text_color(lbl_anim, color, 0);
 }
 
-static screen_t prev_non_splash_screen = SCREEN_USAGE;
 static void apply_battery_visibility(void) {
     if (!battery_img) return;
     if (current_screen == SCREEN_SPLASH) lv_obj_add_flag(battery_img, LV_OBJ_FLAG_HIDDEN);
     else                                  lv_obj_clear_flag(battery_img, LV_OBJ_FLAG_HIDDEN);
 }
 
+// Tap cycles splash → usage → now playing → splash.
 static void global_click_cb(lv_event_t* e) {
     (void)e;
-    if (current_screen == SCREEN_SPLASH) ui_show_screen(prev_non_splash_screen);
-    else                                  ui_show_screen(SCREEN_SPLASH);
+    ui_show_screen((screen_t)((current_screen + 1) % SCREEN_COUNT));
+}
+
+static void toast_click_cb(lv_event_t* e) {
+    (void)e;
+    ui_show_screen(SCREEN_NOW_PLAYING);
+}
+
+void ui_update_media(bool new_track) {
+    now_playing_refresh();
+    if (!new_track) return;
+    // The toast announces a new song on the other screens. Never wake a dark
+    // panel for it, and skip it over a direct-drawn splash (it'd be painted over).
+    if (current_screen == SCREEN_NOW_PLAYING || idle_is_asleep()) return;
+    if (current_screen == SCREEN_SPLASH && splash_draws_direct()) return;
+    now_playing_toast();
 }
 
 void ui_show_screen(screen_t screen) {
     lv_obj_add_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
     splash_hide();
+    now_playing_hide();
 
     switch (screen) {
     case SCREEN_SPLASH:  splash_show(); break;
     case SCREEN_USAGE:   lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_HIDDEN); break;
+    case SCREEN_NOW_PLAYING: now_playing_show(); break;
     default: break;
     }
+    if (screen == SCREEN_NOW_PLAYING || (screen == SCREEN_SPLASH && splash_draws_direct()))
+        now_playing_toast_hide();
 
     splash_mascot_set_visible(screen != SCREEN_SPLASH);
     if (logo_img) {
@@ -798,14 +821,12 @@ void ui_show_screen(screen_t screen) {
         else                          lv_obj_clear_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
     }
 
-    if (screen != SCREEN_SPLASH) prev_non_splash_screen = screen;
     current_screen = screen;
     apply_battery_visibility();
 }
 
 void ui_toggle_splash(void) {
-    if (current_screen == SCREEN_SPLASH) ui_show_screen(prev_non_splash_screen);
-    else                                  ui_show_screen(SCREEN_SPLASH);
+    ui_show_screen(current_screen == SCREEN_SPLASH ? SCREEN_USAGE : SCREEN_SPLASH);
 }
 
 screen_t ui_get_current_screen(void) {

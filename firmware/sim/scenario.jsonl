@@ -12,3 +12,5 @@
 {"name":"claude working","hold_ms":8000,"s":44.0,"sr":178,"w":34.0,"wr":7890,"st":"allowed","ok":true,"cc":"working"}
 {"name":"claude waiting for you","hold_ms":8000,"s":45.0,"sr":177,"w":34.0,"wr":7889,"st":"allowed","ok":true,"cc":"waiting"}
 {"name":"claude idle","hold_ms":5000,"s":45.0,"sr":176,"w":34.0,"wr":7888,"st":"allowed","ok":true,"cc":"idle"}
+{"name":"now playing","hold_ms":6000,"np":{"st":"Playing","ti":"The coffee just kicked in","ar":"Cosmic Hippo","al":"Late Night Sessions","len":245,"pos":83}}
+{"name":"paused","hold_ms":4000,"np":{"st":"Paused","ti":"The coffee just kicked in","ar":"Cosmic Hippo","al":"Late Night Sessions","len":245,"pos":90}}
