@@ -14,6 +14,7 @@ struct UsageData {
     char reset_date[12];     // formatted reset date e.g. "Jul 1" (Enterprise)
     long clock_epoch;        // local wall-clock epoch (s) from daemon; 0 = not provided
     int  clock_fmt;          // 12 or 24 (hour format from daemon); defaults to 24
+    char claude[12];         // Claude Code state "idle"/"working"/"waiting"; "" = not sent
     bool ok;                 // data parse succeeded
     bool valid;              // false until first successful parse
 };

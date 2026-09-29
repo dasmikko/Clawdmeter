@@ -123,6 +123,31 @@ configure_chime() {
     fi
 }
 
+# Offer the Claude Code hooks that report working / waiting-for-you / idle to
+# the device (daemon/claude-state-hook.sh). Merged into settings.json of every
+# configured Claude config dir; other hooks are left alone.
+configure_claude_hooks() {
+    [ -t 0 ] || return 0
+    local ans
+    read -r -p "  Show Claude Code's state (working / waiting for you) on the device? [Y/n] " ans || ans=""
+    if [[ "$ans" =~ ^[Nn]$ ]]; then
+        echo "  Skipped. Run daemon/install-claude-hooks.py later to enable."
+        return 0
+    fi
+    local raw d
+    local -a settings=()
+    raw=$(current_config_value config_dirs)
+    [ -z "$raw" ] && raw="$HOME/.claude"
+    IFS=',' read -ra dirs <<< "$raw"
+    for d in "${dirs[@]}"; do
+        d=$(echo "$d" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+        [ -z "$d" ] && continue
+        case "$d" in "~") d="$HOME" ;; "~/"*) d="$HOME/${d#\~/}" ;; esac
+        settings+=("$d/settings.json")
+    done
+    python3 "$SCRIPT_DIR/daemon/install-claude-hooks.py" "${settings[@]}"
+}
+
 echo "=== Claude Usage Tracker - Install ==="
 echo ""
 
@@ -147,6 +172,7 @@ echo "[3/4] Configuring the daemon..."
 configure_config_dirs
 configure_clock
 configure_chime
+configure_claude_hooks
 echo ""
 
 # Enable service

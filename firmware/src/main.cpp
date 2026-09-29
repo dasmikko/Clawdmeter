@@ -12,6 +12,7 @@
 #include "idle.h"
 #include "idle_cfg.h"
 #include "brightness.h"
+#include "claude_state.h"
 
 #include "hal/board_caps.h"
 #include "hal/display_hal.h"
@@ -119,6 +120,7 @@ static bool parse_json(const char* json, UsageData* out) {
     strlcpy(out->reset_date, doc["rd"] | "", sizeof(out->reset_date));
     out->clock_epoch = doc["t"] | 0L;
     out->clock_fmt = doc["tf"] | 24;
+    strlcpy(out->claude, doc["cc"] | "", sizeof(out->claude));
     out->ok = doc["ok"] | false;
     out->valid = true;
     return true;
@@ -383,7 +385,17 @@ void loop() {
                 Serial.println("session reset detected — chime");
                 sound_hal_play_reset();
             }
-            if (g_after != g_before) {
+            if (claude_state_set_from_str(usage.claude[0] ? usage.claude : NULL)) {
+                Serial.printf("claude state: %s\n", usage.claude[0] ? usage.claude : "unknown");
+                splash_request_repick();
+                // Claude needs you: light the panel if it dozed off, and cut
+                // straight to an attention animation instead of letting the
+                // current scene play out.
+                if (claude_state_get() == CLAUDE_WAITING) {
+                    idle_note_activity();
+                    if (splash_is_active()) splash_pick_for_current_rate();
+                }
+            } else if (g_after != g_before) {
                 Serial.printf("usage rate: group %d -> %d (s=%.2f%%)\n",
                     g_before, g_after, usage.session_pct);
                 if (splash_is_active()) splash_pick_for_current_rate();

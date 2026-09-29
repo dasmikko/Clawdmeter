@@ -3,6 +3,7 @@
 #include "splash_geometry.h"
 #include "theme.h"
 #include "usage_rate.h"
+#include "claude_state.h"
 #include "hal/board_caps.h"
 #include "hal/display_hal.h"
 #include <Arduino.h>
@@ -46,11 +47,14 @@ static bool active = false;
 // rate-driven group every this many ms.
 #define SPLASH_ROTATE_INTERVAL_MS 20000
 
-// Usage-rate animation groups: 4 groups × up to 4 animations each.
-// Filled at init by matching literal names from splash_anims[].
-// (jumping is the only unassigned animation — still reachable via splash_next.)
-#define GROUP_COUNT 4
+// Animation groups: 4 usage-rate groups + 2 Claude Code state groups, up to 4
+// animations each. Filled at init by matching literal names from splash_anims[].
+// While the daemon reports Claude working / waiting, those groups win; when
+// Claude is idle (or the hooks aren't installed) the usage rate picks.
+#define GROUP_COUNT 6
 #define GROUP_MAX   4
+#define GROUP_WORKING 4
+#define GROUP_WAITING 5
 static int8_t  group_lists[GROUP_COUNT][GROUP_MAX];
 static uint8_t group_size[GROUP_COUNT] = {0};
 static uint8_t group_rotation[GROUP_COUNT] = {0};
@@ -65,7 +69,22 @@ static const char* GROUP_NAMES[GROUP_COUNT][GROUP_MAX] = {
     { "laptop", "dancing", "skateboard", "soccer" },
     // Group 3 — heavy burn (high-energy rides + the most exuberant jump)
     { "racing car", "cloud", "sailing scene", "jumping happy" },
+    // Group 4 — Claude is working (typing away / investigating)
+    { "laptop", "magnifier", NULL, NULL },
+    // Group 5 — Claude is waiting for you (trying to get your attention)
+    { "waving", "jumping", "pointing", NULL },
 };
+
+// Which group the splash should draw from right now.
+static int current_group(void) {
+    switch (claude_state_get()) {
+    case CLAUDE_WORKING: return GROUP_WORKING;
+    case CLAUDE_WAITING: return GROUP_WAITING;
+    default: break;
+    }
+    int g = usage_rate_group();
+    return (g < 0 || g > 3) ? 0 : g;
+}
 
 // Scratch stage: the current animation frame composed centered onto the full
 // 60×60 grid (index 0 = background elsewhere). 3.6 KB of static RAM.
@@ -439,7 +458,7 @@ static bool mas_from_loop = false;
 
 // The corner mascot mirrors the splash's excitement: per usage-rate group,
 // how long he idles between acts and which acts he does. "lurking" means the
-// walk-off / full-size-lurk / walk-back trip. Acts must fit the 28×21-cell
+// walk-off / full-size-lurk / walk-back trip. Acts must fit the 34×23-cell
 // buffer (jumps are too tall for the corner).
 static const char* MAS_ACTS_BY_RATE[4][4] = {
     { "pointing", "lurking", NULL,       NULL      },   // idle: sparse, sneaky
@@ -448,6 +467,26 @@ static const char* MAS_ACTS_BY_RATE[4][4] = {
     { "dancing",  "waving",  "dancing",  "lurking" },   // heavy: can't sit still
 };
 static const uint16_t MAS_STILL_MS_BY_RATE[4] = { 10000, 7000, 5000, 3500 };
+
+// Claude Code state overrides: working → he types on the laptop (the typing
+// loop is held for as long as Claude keeps working); waiting → he keeps
+// waving / pointing at you until you answer.
+static const char* MAS_ACTS_WORKING[4] = { "laptop", NULL, NULL, NULL };
+static const char* MAS_ACTS_WAITING[4] = { "waving", "pointing", NULL, NULL };
+#define MAS_STILL_MS_WORKING 800
+#define MAS_STILL_MS_WAITING 1200
+
+static const char* const* mas_acts(uint32_t *still_ms) {
+    switch (claude_state_get()) {
+    case CLAUDE_WORKING: *still_ms = MAS_STILL_MS_WORKING; return MAS_ACTS_WORKING;
+    case CLAUDE_WAITING: *still_ms = MAS_STILL_MS_WAITING; return MAS_ACTS_WAITING;
+    default: break;
+    }
+    int g = usage_rate_group();
+    if (g < 0 || g > 3) g = 0;
+    *still_ms = MAS_STILL_MS_BY_RATE[g];
+    return MAS_ACTS_BY_RATE[g];
+}
 
 static const splash_anim_def_t* anim_by_name(const char *n) {
     for (int i = 0; i < SPLASH_ANIM_COUNT; i++)
@@ -504,8 +543,8 @@ lv_obj_t* splash_mascot_create(lv_obj_t *parent, int slot_x, int feet_y, int cel
     mas_slot_x = slot_x;
     mas_feet_y = feet_y;
     mas_screen_w = board_caps().width;
-    // Buffer for the largest act bbox (pointing, 28×21 cells).
-    const size_t mas_bytes = (size_t)(28 * cell) * (21 * cell) * 3;
+    // Buffer for the largest act bbox (laptop, 34×23 cells).
+    const size_t mas_bytes = (size_t)(34 * cell) * (23 * cell) * 3;
     const splash_anim_def_t *lurk = anim_by_name("lurking");
     const BoardCaps& c = board_caps();
     int mind = (c.width < c.height) ? c.width : c.height;
@@ -546,13 +585,13 @@ void splash_mascot_tick(void) {
     const uint32_t now = millis();
 
     if (mas_mode == MAS_STILL) {
-        int g = usage_rate_group();
-        if (g < 0 || g > 3) g = 0;
-        if (now - mas_mode_started < MAS_STILL_MS_BY_RATE[g]) return;
+        uint32_t still_ms;
+        const char* const* acts = mas_acts(&still_ms);
+        if (now - mas_mode_started < still_ms) return;
         uint8_t count = 0;
-        while (count < 4 && MAS_ACTS_BY_RATE[g][count]) count++;
+        while (count < 4 && acts[count]) count++;
         if (count == 0) { mas_mode_started = now; return; }
-        const char *act = MAS_ACTS_BY_RATE[g][mas_act_idx++ % count];
+        const char *act = acts[mas_act_idx++ % count];
         mas_frame = 0;
         mas_frame_started = now;
         mas_from_loop = false;
@@ -578,6 +617,10 @@ void splash_mascot_tick(void) {
     const bool walking_mode = (mas_mode == MAS_WALK_OFF || mas_mode == MAS_WALK_IN);
     if (walking_mode && mas_frame == a->loop_end)
         next = a->loop_start;                       // walk: hold the gait loop
+    // Working: keep typing while Claude works; the outro plays once it stops.
+    if (mas_mode == MAS_ACT && mas_frame == a->loop_end &&
+        claude_state_get() == CLAUDE_WORKING && strcmp(a->name, "laptop") == 0)
+        next = a->loop_start;
 
     if (next >= a->frame_count) {                   // act / lurk finished
         if (mas_mode == MAS_LURK) {
@@ -839,8 +882,7 @@ void splash_next(void) {
 
 void splash_pick_for_current_rate(void) {
     if (SPLASH_ANIM_COUNT == 0) return;
-    int g = usage_rate_group();
-    if (g < 0 || g >= GROUP_COUNT) g = 0;
+    int g = current_group();
     if (group_size[g] == 0) return;
 
     uint8_t slot = group_rotation[g] % group_size[g];
@@ -855,6 +897,13 @@ void splash_pick_for_current_rate(void) {
     const splash_anim_def_t *a = &splash_anims[cur_anim];
     anim_reset(a);
     render_frame(compose_stage(a, 0), a->palette);
+}
+
+void splash_request_repick(void) {
+    // Expire the rotation timer: the next splash_tick() takes the graceful
+    // switch path (walkers finish at home, scenes play their outro).
+    last_pick_ms = millis() - SPLASH_ROTATE_INTERVAL_MS;
+    mas_mode_started = 0;   // corner mascot: skip the rest of its idle wait
 }
 
 bool splash_is_active(void) { return active; }

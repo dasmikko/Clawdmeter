@@ -21,6 +21,10 @@ void splash_hide(void);
 // trigger a re-pick when the rate group changes mid-display.
 void splash_pick_for_current_rate(void);
 
+// Claude Code state changed: switch animation soon, gracefully (next tick
+// takes the auto-rotate path). Also cuts the corner mascot's idle wait short.
+void splash_request_repick(void);
+
 // True when splash is currently rendering (used to gate re-picks).
 bool splash_is_active(void);
 
