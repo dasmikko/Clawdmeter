@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "splash.h"
+#include "claude_state.h"
 #include <lvgl.h>
 #include <time.h>
 #include "logo.h"
@@ -737,23 +738,35 @@ void ui_tick_anim(void) {
     anim_spinner_idx = (anim_phase < SPINNER_COUNT) ? anim_phase
                                                     : (SPINNER_PHASES - anim_phase);
 
-    // Status text by priority. Whimsical messages only when connected & settled.
+    // Status text by priority. Whimsical messages only when connected & settled;
+    // when the daemon reports Claude Code's state, they mean Claude is working.
     const char* text;
+    const claude_state_t cs = claude_state_get();
+    lv_color_t color = COL_ACCENT;
+    bool spin = true;
     if (!s_ble_connected) {
         text = "Waiting";              // advertising / waiting for a host connection
     } else if (view_state == 1) {      // idle — alternate so it reads as alive AND data-less
         text = (anim_msg_idx & 1) ? "No data" : "Listening";
     } else if (now - connected_at_ms < 5000) {
         text = "Connected";
+    } else if (cs == CLAUDE_WAITING) {
+        text = "Needs your input";
+        color = COL_TEXT;
+    } else if (cs == CLAUDE_IDLE) {
+        text = "Ready";
+        color = COL_DIM;
+        spin = false;
     } else {
-        text = anim_messages[anim_msg_idx];
+        text = anim_messages[anim_msg_idx];   // working, or state not reported
     }
 
-    // All states share the whimsical style: "<glyph> <Title-case word>…"
+    // Whimsical style: "<glyph> <Title-case word>…"; idle is a still "✻ Ready".
     static char buf[80];
-    snprintf(buf, sizeof(buf), "%s %s\xE2\x80\xA6",
-             spinner_frames[anim_spinner_idx], text);
+    if (spin) snprintf(buf, sizeof(buf), "%s %s\xE2\x80\xA6", spinner_frames[anim_spinner_idx], text);
+    else      snprintf(buf, sizeof(buf), "%s %s", spinner_frames[4], text);
     lv_label_set_text(lbl_anim, buf);
+    lv_obj_set_style_text_color(lbl_anim, color, 0);
 }
 
 static screen_t prev_non_splash_screen = SCREEN_USAGE;

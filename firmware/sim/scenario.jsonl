@@ -9,3 +9,6 @@
 {"name":"weekly nearly gone","hold_ms":3000,"s":25.0,"sr":250,"w":96.0,"wr":300,"st":"allowed","ok":true}
 {"name":"enterprise on pace","hold_ms":3000,"s":37.0,"sr":-1,"acct":"ent","tp":40,"pd":30,"rd":"Aug 15","st":"allowed","ok":true}
 {"name":"enterprise over pace","hold_ms":4000,"s":88.0,"sr":-1,"acct":"ent","tp":52,"pd":30,"rd":"Aug 15","st":"allowed","ok":true}
+{"name":"claude working","hold_ms":8000,"s":44.0,"sr":178,"w":34.0,"wr":7890,"st":"allowed","ok":true,"cc":"working"}
+{"name":"claude waiting for you","hold_ms":8000,"s":45.0,"sr":177,"w":34.0,"wr":7889,"st":"allowed","ok":true,"cc":"waiting"}
+{"name":"claude idle","hold_ms":5000,"s":45.0,"sr":176,"w":34.0,"wr":7888,"st":"allowed","ok":true,"cc":"idle"}

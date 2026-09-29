@@ -35,6 +35,14 @@ LAST_WRITE_TS=0      # epoch of the last GATT write of any kind (poll or heartbe
 DBUS_DEST="org.bluez"
 NOTIFY_PID=""
 
+# Claude Code state (working / waiting / idle), written per session by
+# daemon/claude-state-hook.sh from Claude Code hooks. Sent to the device as
+# "cc"; omitted entirely when the hooks have never run (dir absent).
+CLAUDE_STATE_DIR="${CLAWDMETER_STATE_DIR:-$HOME/.cache/claude-usage-monitor/claude-state}"
+CLAUDE_WORKING_STALE_S=900   # "working" with no hook for 15 min reads as idle
+CLAUDE_WAITING_STALE_S=3600  # "waiting" with no hook for 1 h reads as idle
+LAST_CC=""                  # "cc" value in the last write to the device
+
 log() {
     echo "[$(date '+%H:%M:%S')] $1"
 }
@@ -142,17 +150,72 @@ print(json.dumps(d, separators=(",", ":")))
 PYEOF
 }
 
+# True when session transcript $1 records an Esc interrupt at or after epoch
+# $2 (the state file's mtime). Interrupting fires no hook, but Claude Code
+# writes a top-level user entry "[Request interrupted by user]" (or "... for
+# tool use]") to the transcript. The match needs the unescaped JSON form:
+# the same text quoted inside tool output or messages is escaped (\"), so it
+# can't false-match while Claude is actually working.
+session_interrupted() {
+    local tp="$1" since="$2" line ts
+    [ -n "$tp" ] && [ -f "$tp" ] || return 1
+    [ "$(stat -c %Y "$tp" 2>/dev/null || echo 0)" -ge "$since" ] || return 1
+    line=$(tail -c 65536 "$tp" 2>/dev/null \
+        | grep -F '"content":[{"type":"text","text":"[Request interrupted by user' | tail -n 1)
+    [ -n "$line" ] || return 1
+    ts=$(printf '%s' "$line" | grep -o '"timestamp":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+    [ -n "$ts" ] || return 1
+    ts=$(date -d "$ts" +%s 2>/dev/null) || return 1
+    (( ts >= since ))
+}
+
+# Aggregate Claude Code state across all sessions: waiting > working > idle.
+# Echoes nothing when the hooks aren't installed. A session interrupted with
+# Esc reads as idle (see session_interrupted). A killed terminal fires no
+# hook and writes no transcript, so a session stuck on "working" is treated
+# as idle after CLAUDE_WORKING_STALE_S without a hook (tool calls refresh it),
+# and one stuck on "waiting" after CLAUDE_WAITING_STALE_S (you may be away).
+read_claude_state() {
+    [ -d "$CLAUDE_STATE_DIR" ] || return 0
+    local st="idle" now mtime f s tp
+    now=$(date +%s)
+    while read -r mtime f; do
+        s="" tp=""
+        { read -r s; read -r tp; } < "$f" 2>/dev/null
+        case "$s" in
+            waiting|working) session_interrupted "$tp" "$mtime" && continue ;;
+        esac
+        case "$s" in
+            waiting) (( now - mtime < CLAUDE_WAITING_STALE_S )) && { st=waiting; break; } ;;
+            working) (( now - mtime < CLAUDE_WORKING_STALE_S )) && st=working ;;
+        esac
+    done < <(find "$CLAUDE_STATE_DIR" -maxdepth 1 -type f ! -name '.*' \
+                 -printf '%Ts %p\n' 2>/dev/null)
+    echo "$st"
+}
+
+# Write a payload to the device with the current Claude state appended.
+send_payload() {
+    local payload="$1" cc
+    cc=$(read_claude_state)
+    [ -n "$cc" ] && payload="${payload%\}},\"cc\":\"$cc\"}"
+    write_gatt "$RX_CHAR_PATH" "$payload" || return 1
+    LAST_CC="$cc"
+    LAST_WRITE_TS=$(date +%s)
+    return 0
+}
+
 # Replay the last payload, aged by the time since it was fetched, so the
 # device's freshness window (90s in firmware) never lapses between polls.
+# Also used to push a Claude state change without an API call ($1 = reason).
 heartbeat() {
     [ -z "$LAST_PAYLOAD" ] && return 1
     local now aged
     now=$(date +%s)
     aged=$(age_payload "$LAST_PAYLOAD" $(( now - LAST_PAYLOAD_TS ))) || return 1
     [ -z "$aged" ] && return 1
-    log "Heartbeat: $aged"
-    write_gatt "$RX_CHAR_PATH" "$aged" || { log "Heartbeat write failed"; return 1; }
-    LAST_WRITE_TS=$now
+    log "${1:-Heartbeat}: $aged"
+    send_payload "$aged" || { log "Heartbeat write failed"; return 1; }
     return 0
 }
 
@@ -527,10 +590,11 @@ poll() {
         log "Active plan: $best_dir (s=$best_s)"
     fi
     log "Sending: ${cycle_payload[$best_dir]}"
-    write_gatt "$RX_CHAR_PATH" "${cycle_payload[$best_dir]}" || { log "Write failed"; return 1; }
+    send_payload "${cycle_payload[$best_dir]}" || { log "Write failed"; return 1; }
     LAST_PAYLOAD="${cycle_payload[$best_dir]}"
-    LAST_PAYLOAD_TS=$(date +%s)
-    LAST_WRITE_TS=$LAST_PAYLOAD_TS
+    LAST_PAYLOAD_TS=$LAST_WRITE_TS
+    # Sweep state files of sessions that died without a SessionEnd.
+    [ -d "$CLAUDE_STATE_DIR" ] && find "$CLAUDE_STATE_DIR" -maxdepth 1 -type f -mtime +1 -delete 2>/dev/null
     return 0
 }
 
@@ -613,7 +677,15 @@ while true; do
         elif (( HEARTBEAT_INTERVAL < POLL_INTERVAL && NOW - LAST_WRITE_TS >= HEARTBEAT_INTERVAL )); then
             heartbeat
         fi
-        sleep "$TICK"
+        # Sleep out the tick in 1s steps, pushing Claude state changes
+        # (working / waiting / idle) to the device as soon as they happen.
+        for (( i = 0; i < TICK; i++ )); do
+            sleep 1
+            [ -f "$REFRESH_FLAG" ] && break
+            if [ -n "$LAST_PAYLOAD" ] && [ "$(read_claude_state)" != "$LAST_CC" ]; then
+                heartbeat "Claude state -> $(read_claude_state)"
+            fi
+        done
     done
 
     stop_notify_subscriber
