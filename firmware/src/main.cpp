@@ -13,6 +13,7 @@
 #include "idle_cfg.h"
 #include "brightness.h"
 #include "claude_state.h"
+#include "media.h"
 
 #include "hal/board_caps.h"
 #include "hal/display_hal.h"
@@ -98,15 +99,8 @@ static void my_touch_cb(lv_indev_t* indev, lv_indev_data_t* data) {
     }
 }
 
-// Parse a JSON line into UsageData.
-static bool parse_json(const char* json, UsageData* out) {
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, json);
-    if (err) {
-        Serial.printf("JSON parse error: %s\n", err.c_str());
-        return false;
-    }
-
+// Fill UsageData from a parsed usage payload.
+static bool parse_json(const JsonDocument& doc, UsageData* out) {
     out->session_pct = doc["s"] | 0.0f;
     out->session_reset_mins = doc["sr"] | -1;
     out->weekly_pct = doc["w"] | 0.0f;
@@ -374,7 +368,17 @@ void loop() {
     check_serial_cmd();
 
     if (ble_has_data()) {
-        if (parse_json(ble_get_data(), &usage)) {
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, ble_get_data());
+        if (err) {
+            Serial.printf("JSON parse error: %s\n", err.c_str());
+            ble_send_nack();
+        } else if (doc["np"].is<JsonObjectConst>()) {
+            // Now playing — its own message, never mixed with usage fields.
+            bool new_track = media_update(doc["np"].as<JsonObjectConst>());
+            ui_update_media(new_track);
+            ble_send_ack();
+        } else if (parse_json(doc, &usage)) {
             int g_before = usage_rate_group();
             bool session_reset = usage_rate_sample(usage.session_pct);
             int g_after = usage_rate_group();

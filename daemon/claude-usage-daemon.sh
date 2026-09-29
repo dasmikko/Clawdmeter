@@ -43,6 +43,13 @@ CLAUDE_WORKING_STALE_S=900   # "working" with no hook for 15 min reads as idle
 CLAUDE_WAITING_STALE_S=3600  # "waiting" with no hook for 1 h reads as idle
 LAST_CC=""                  # "cc" value in the last write to the device
 
+# Now playing: daemon/media_watch.py polls MPRIS (playerctl) and keeps the
+# current track as a ready-made {"np":{...}} payload in MEDIA_FILE; the loop
+# below forwards it whenever it changes. Disable with `now_playing = off`.
+MEDIA_FILE="$HOME/.cache/claude-usage-monitor/now-playing.json"
+MEDIA_PID=""
+LAST_MEDIA_SENT=""          # MEDIA_FILE content last written to the device
+
 log() {
     echo "[$(date '+%H:%M:%S')] $1"
 }
@@ -598,13 +605,56 @@ poll() {
     return 0
 }
 
+# Read the `now_playing` option. Echoes on|off (default on).
+read_now_playing_setting() {
+    local val=""
+    if [ -f "$CONFIG_FILE" ]; then
+        val=$(grep -E '^[[:space:]]*now_playing[[:space:]]*=' "$CONFIG_FILE" | tail -1 \
+            | tr -d '\r' \
+            | sed -E 's/^[[:space:]]*now_playing[[:space:]]*=[[:space:]]*//; s/[[:space:]]*(#.*)?$//' \
+            | tr '[:upper:]' '[:lower:]')
+    fi
+    case "$val" in
+        off) echo "off" ;;
+        *)   echo "on" ;;
+    esac
+}
+
+# Start the now-playing watcher (needs playerctl). setsid makes it a process
+# group leader so cleanup can kill it with its playerctl children.
+start_media_watcher() {
+    [ "$(read_now_playing_setting)" = "on" ] || { log "Now playing: off (config)"; return 0; }
+    command -v playerctl >/dev/null || { log "Now playing: playerctl not installed, skipping"; return 0; }
+    rm -f "$MEDIA_FILE"
+    setsid python3 "$(dirname "$(readlink -f "$0")")/media_watch.py" "$MEDIA_FILE" &
+    MEDIA_PID=$!
+    log "Now playing watcher started (pgid=$MEDIA_PID)"
+}
+
+stop_media_watcher() {
+    [ -n "$MEDIA_PID" ] && kill -TERM -"$MEDIA_PID" 2>/dev/null
+    MEDIA_PID=""
+}
+
+# Forward the current track to the device if it changed since the last write.
+send_media_if_changed() {
+    [ -f "$MEDIA_FILE" ] || return 0
+    local cur
+    cur=$(<"$MEDIA_FILE")
+    [ -n "$cur" ] && [ "$cur" != "$LAST_MEDIA_SENT" ] || return 0
+    log "Now playing: $cur"
+    write_gatt "$RX_CHAR_PATH" "$cur" && LAST_MEDIA_SENT="$cur"
+}
+
 cleanup() {
+    stop_media_watcher
     stop_notify_subscriber
     log "Daemon stopped"
     exit 0
 }
 
 trap cleanup INT TERM
+start_media_watcher
 
 log "=== Claude Usage Tracker Daemon (BLE) ==="
 POLL_INTERVAL=$(read_poll_interval)
@@ -656,6 +706,7 @@ while true; do
     # Poll loop: tick every $TICK seconds. Poll Anthropic when the
     # interval has elapsed OR when the ESP requested a refresh.
     LAST_POLL=0
+    LAST_MEDIA_SENT=""   # a (re)connected device has no track yet
     while is_connected; do
         NOW=$(date +%s)
         NEW_INTERVAL=$(read_poll_interval)
@@ -682,6 +733,7 @@ while true; do
         for (( i = 0; i < TICK; i++ )); do
             sleep 1
             [ -f "$REFRESH_FLAG" ] && break
+            send_media_if_changed
             if [ -n "$LAST_PAYLOAD" ] && [ "$(read_claude_state)" != "$LAST_CC" ]; then
                 heartbeat "Claude state -> $(read_claude_state)"
             fi

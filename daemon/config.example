@@ -42,3 +42,8 @@ chime = off
 #   12   = show the clock, forced 12-hour  (e.g. 6:28 PM)
 #   24   = show the clock, forced 24-hour  (e.g. 18:28)
 clock = off
+
+# Show what's playing on this PC (any MPRIS player: Spotify, browsers, mpv...)
+# on the device: a pop-up on new songs, plus a "Music" screen (tap to cycle).
+# Needs playerctl (Linux daemon only). Default on.
+# now_playing = on

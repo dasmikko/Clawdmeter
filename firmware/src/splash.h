@@ -25,6 +25,11 @@ void splash_pick_for_current_rate(void);
 // takes the auto-rotate path). Also cuts the corner mascot's idle wait short.
 void splash_request_repick(void);
 
+// True on boards where the splash paints the panel directly, bypassing LVGL
+// (no PSRAM) — LVGL overlays such as the now-playing toast would be painted
+// over there while the splash runs.
+bool splash_draws_direct(void);
+
 // True when splash is currently rendering (used to gate re-picks).
 bool splash_is_active(void);
 
