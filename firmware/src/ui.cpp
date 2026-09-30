@@ -635,6 +635,10 @@ void ui_init(void) {
     lv_obj_t* scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, COL_BG, 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    // The corner mascot walks off the edges (x < 0, then back in from x = W),
+    // which would make the screen scrollable and draw LVGL's horizontal
+    // scrollbar as a thin white line along the bottom.
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
 #ifndef BOARD_HAS_PSRAM
     // Static corner mascot (see clawd_still.h) — the animated one needs PSRAM.
