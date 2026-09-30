@@ -232,7 +232,7 @@ JSON payload format (written to RX):
 { "s": 45, "sr": 120, "w": 28, "wr": 7200, "st": "allowed", "ok": true }
 ```
 
-Fields: `s` = session %, `sr` = session reset (minutes), `w` = weekly %, `wr` = weekly reset (minutes), `st` = status, `ok` = success flag.
+Fields: `s` = session %, `sr` = session reset (minutes), `w` = weekly %, `wr` = weekly reset (minutes), `st` = status, `ok` = success flag. Optional `m` / `mp` / `mr` = name, weekly % and reset (minutes) of a model with its own weekly limit (e.g. `"m":"Fable","mp":61,"mr":6420`); when present the usage screen adds a slim third row for it.
 
 ## Development
 
