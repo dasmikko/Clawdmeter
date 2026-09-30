@@ -1,5 +1,50 @@
 # Clawdmeter
 
+> [!NOTE]
+> **This is a personal fork** of [HermannBjorgvin/Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter).
+> Everything below the fork notes is the upstream README, updated where the fork changes behavior.
+> For the original project, issues, and board support, go upstream.
+
+## Fork changes
+
+All new behavior is additive. A device running this firmware with an upstream
+daemon (or the macOS / Windows daemons) behaves exactly like upstream. The new
+fields are only sent by the Linux bash daemon (`daemon/claude-usage-daemon.sh`).
+
+- **Claude Code state on the device.** Claude Code hooks
+  (`daemon/claude-state-hook.sh`, installed into `~/.claude/settings.json` by
+  `daemon/install-claude-hooks.py`, offered by `install.sh`) record each
+  session as working / waiting / idle. The daemon combines all sessions
+  (waiting beats working beats idle) and sends the result within about a second
+  of a change.
+  - *Working:* laptop / magnifier splash, the corner mascot types, whimsical status verbs.
+  - *Waiting:* wakes the panel, cuts to waving / jumping / pointing, and shows a green "Needs your input".
+  - *Idle:* the usual usage-rate splash and a still "✳ Ready".
+  - Pressing Esc fires no hook, so the daemon also watches the session transcript for the interrupt entry.
+    Remove the hooks with `daemon/install-claude-hooks.py --remove`.
+- **Now playing.** `daemon/media_watch.py` follows the active MPRIS player
+  through `playerctl` (Spotify, browsers, mpv, …). The device gets a **Music**
+  screen (title, artist, album, progress) in the tap cycle
+  splash → usage → music, plus a pop-up when a new song starts. Needs
+  `playerctl`; turn it off with `now_playing = off`.
+- **Fable weekly limit.** Fable has its own weekly limit that the rate-limit
+  headers don't report, so the daemon also reads the OAuth usage endpoint
+  (the one behind Claude Code's `/usage`). When your plan has that limit, the
+  Usage screen tightens its two panels and adds a slim third row with the
+  percentage, a bar, the reset countdown and a "Fable" pill. On the 368 / 410 px
+  wide boards the bar is dropped for space. Turn it off with `fable_limit = off`.
+- **Firmware plumbing.** Bluetooth writes from the daemon now go through a
+  4-slot queue, so usage, Claude-state and media updates sent back to back
+  aren't dropped. On panels narrower than 480 px the corner mascot dances
+  instead of typing, because its laptop overlapped the title.
+
+Both settings go in `~/.config/claude-usage-monitor/config`; see
+[`daemon/config.example`](daemon/config.example). The payload fields this fork
+adds are `cc` (Claude state), `m` / `mp` / `mr` (Fable limit), and a separate
+`{"np":{…}}` message (now playing).
+
+---
+
 > Also check out [Beam](https://github.com/notaharness/beam)! A CLI that lets you pair your machines using a passkey and [@Tailscale's tailcat](https://tailscale.com/blog/tailcat).
 
 <img src="assets/readme/waving.gif" width="120" align="right" alt="">
@@ -14,7 +59,7 @@ Shift+Tab over BLE HID for Claude Code's voice mode and mode-toggle shortcuts.
 
 ## Screens
 
-The device boots into the splash. Tap the screen anywhere to switch to the Usage view; tap again to flip back to the splash.
+The device boots into the splash. Tap the screen anywhere to cycle splash → Usage → Music (now playing) → splash.
 
 |              Splash               |              Usage              |
 | :-------------------------------: | :-----------------------------: |
