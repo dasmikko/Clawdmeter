@@ -242,6 +242,22 @@ read_chime_setting() {
     esac
 }
 
+# Read the `fable_limit` option from the config file. Echoes one of: on|off.
+# Defaults to "on"; "off" skips the usage-endpoint request and the model row.
+read_fable_limit_setting() {
+    local val=""
+    if [ -f "$CONFIG_FILE" ]; then
+        val=$(grep -E '^[[:space:]]*fable_limit[[:space:]]*=' "$CONFIG_FILE" | tail -1 \
+            | tr -d '\r' \
+            | sed -E 's/^[[:space:]]*fable_limit[[:space:]]*=[[:space:]]*//; s/[[:space:]]*(#.*)?$//' \
+            | tr '[:upper:]' '[:lower:]')
+    fi
+    case "$val" in
+        off) echo "off" ;;
+        *)   echo "on" ;;
+    esac
+}
+
 # Read the `clock` option from the config file. Echoes one of: off|auto|12|24.
 # Defaults to "off" so existing setups keep showing "Usage" until opted in.
 read_clock_setting() {
@@ -532,8 +548,8 @@ build_payload_for_token() {
         s5h_util=${s5h_util:-0}; s5h_reset=${s5h_reset:-0}
         s7d_util=${s7d_util:-0}; s7d_reset=${s7d_reset:-0}
         s5h_status=${s5h_status:-unknown}
-        local model_fragment
-        model_fragment=$(fetch_model_limit "$token")
+        local model_fragment=""
+        [ "$(read_fable_limit_setting)" = "on" ] && model_fragment=$(fetch_model_limit "$token")
         payload=$(awk -v u5="$s5h_util" -v r5="$s5h_reset" -v u7="$s7d_util" -v r7="$s7d_reset" -v st="$s5h_status" -v now="$now" -v mdl="$model_fragment" -v clk="$clock_fragment" -v chm="$chime_fragment" \
             'BEGIN {
                 sp = sprintf("%.0f", u5 * 100);

@@ -43,6 +43,12 @@ chime = off
 #   24   = show the clock, forced 24-hour  (e.g. 18:28)
 clock = off
 
+# Show your Fable weekly limit as a slim third row on the Usage screen, with
+# its reset countdown. Only appears when your plan has one.
+# Costs one extra request per poll to the usage endpoint (Linux daemon only).
+# Default on.
+# fable_limit = on
+
 # Show what's playing on this PC (any MPRIS player: Spotify, browsers, mpv...)
 # on the device: a pop-up on new songs, plus a "Music" screen (tap to cycle).
 # Needs playerctl (Linux daemon only). Default on.
