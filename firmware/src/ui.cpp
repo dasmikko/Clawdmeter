@@ -875,7 +875,7 @@ void ui_tick_anim(void) {
         text = "Connected";
     } else if (cs == CLAUDE_WAITING) {
         text = "Needs your input";
-        color = COL_TEXT;
+        color = COL_GREEN;
     } else if (cs == CLAUDE_IDLE) {
         text = "Ready";
         color = COL_DIM;
