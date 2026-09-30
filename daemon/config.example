@@ -34,6 +34,20 @@
 #   off = silent (default)
 #   on  = chime through the board speaker (boards with audio: AMOLED-2.16 / 1.8)
 chime = off
+
+# Leave the Usage/Music screen for the animated splash after this many minutes
+# with no button press, touch or Claude Code state change; the next one brings
+# the previous screen back. Spreads OLED wear (burn-in) on an always-on panel.
+#   10  = after 10 minutes (the firmware default when this line is absent)
+#   off = never; stay on whatever screen you left it on
+# screensaver = 10
+
+# Turn the screen off (black) after this many minutes with no button press,
+# touch or Claude Code state change. A touch, a button or Claude changing state
+# wakes it.
+#   30  = after 30 minutes (the firmware default when this line is absent)
+#   off = never while on USB (a board on battery still turns off after 30)
+# screen_off = 30
 # Show a clock on the Usage screen, in place of the "Usage" title.
 #   off  = no clock; the screen keeps showing "Usage" (default)
 #   auto = show the clock, auto-detecting 12h/24h from this machine's settings

@@ -118,6 +118,8 @@ static bool parse_json(const JsonDocument& doc, UsageData* out) {
     out->clock_epoch = doc["t"] | 0L;
     out->clock_fmt = doc["tf"] | 24;
     strlcpy(out->claude, doc["cc"] | "", sizeof(out->claude));
+    out->screensaver_min = doc["ss"] | -1;
+    out->screen_off_min = doc["so"] | -1;
     out->ok = doc["ok"] | false;
     out->valid = true;
     return true;
@@ -284,8 +286,28 @@ static void pair_tick(void) {
     }
 }
 
+// Screensaver: while idle says it's on, show the animated splash; when it
+// ends, put back the screen it replaced — unless it was the splash already or
+// the user moved on in the meantime.
+static void screensaver_tick(void) {
+    static bool     was_on   = false;
+    static bool     switched = false;
+    static screen_t back_to  = SCREEN_USAGE;
+    const bool on = idle_saver_active();
+    if (on == was_on) return;
+    was_on = on;
+    if (on) {
+        back_to  = ui_get_current_screen();
+        switched = back_to != SCREEN_SPLASH;
+        if (switched) ui_show_screen(SCREEN_SPLASH);
+    } else if (switched && ui_get_current_screen() == SCREEN_SPLASH) {
+        ui_show_screen(back_to);
+    }
+}
+
 void loop() {
     idle_tick();
+    screensaver_tick();
     lv_timer_handler();
     ui_tick_anim();
     ble_tick();
@@ -382,6 +404,10 @@ void loop() {
             ui_update_media(new_track);
             ble_send_ack();
         } else if (parse_json(doc, &usage)) {
+            if (usage.screensaver_min >= 0)
+                idle_set_saver_after_ms((uint32_t)usage.screensaver_min * 60UL * 1000UL);
+            if (usage.screen_off_min >= 0)
+                idle_set_sleep_after_ms((uint32_t)usage.screen_off_min * 60UL * 1000UL);
             int g_before = usage_rate_group();
             bool session_reset = usage_rate_sample(usage.session_pct);
             int g_after = usage_rate_group();
@@ -395,11 +421,12 @@ void loop() {
             if (claude_state_set_from_str(usage.claude[0] ? usage.claude : NULL)) {
                 Serial.printf("claude state: %s\n", usage.claude[0] ? usage.claude : "unknown");
                 splash_request_repick();
-                // Claude needs you: light the panel if it dozed off, and cut
-                // straight to an attention animation instead of letting the
-                // current scene play out.
+                // A state change means a live session, so brighten a dimmed
+                // panel. Claude needs you: also light it if it dozed off, and
+                // cut straight to an attention animation instead of letting
+                // the current scene play out.
+                idle_note_activity();
                 if (claude_state_get() == CLAUDE_WAITING) {
-                    idle_note_activity();
                     if (splash_is_active()) splash_pick_for_current_rate();
                 }
             } else if (g_after != g_before) {

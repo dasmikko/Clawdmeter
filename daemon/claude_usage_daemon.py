@@ -359,6 +359,38 @@ def read_clock_setting() -> str:
     return "off"
 
 
+def read_minutes_setting(name: str):
+    """Read a `<name> = <minutes>|off` option (screensaver, screen_off).
+    Returns 0 for "off", the minutes (capped at 1440), or None when
+    unset/invalid so the firmware keeps its built-in default.
+    """
+    try:
+        if CONFIG_FILE.exists():
+            for line in CONFIG_FILE.read_text().splitlines():
+                line = line.split("#", 1)[0].strip()
+                if "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                if key.strip().lower() == name:
+                    val = val.strip().lower()
+                    if val == "off":
+                        return 0
+                    if val.isdigit():
+                        return min(int(val), 1440)
+    except OSError:
+        pass
+    return None
+
+
+def add_screen_fields(payload: dict) -> None:
+    """Add "ss" / "so" (minutes) when the config sets `screensaver` /
+    `screen_off`; omitted otherwise so the firmware keeps its defaults."""
+    for name, field in (("screensaver", "ss"), ("screen_off", "so")):
+        minutes = read_minutes_setting(name)
+        if minutes is not None:
+            payload[field] = minutes
+
+
 def add_chime_field(payload: dict) -> None:
     """Add "c":1 to the payload when the config opts in, so the firmware may
     sound the session-reset chime. Omitted entirely when chime is off."""
@@ -464,6 +496,7 @@ async def poll_api(token: str) -> dict | None:
             "ok": True,
         }
     add_chime_field(payload)   # adds "c":1 iff the config opts in
+    add_screen_fields(payload)   # adds "ss" / "so" iff the config sets them
     add_clock_fields(payload)   # adds "t" + "tf" iff the config opts in
     return payload
 

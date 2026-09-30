@@ -242,6 +242,24 @@ read_chime_setting() {
     esac
 }
 
+# Read a `<key> = <minutes>|off` option (screensaver, screen_off) from the
+# config file. Echoes minutes (0 = off, capped at 1440), or nothing when
+# unset/invalid so the firmware keeps its built-in default.
+read_minutes_setting() {
+    local key="$1" val=""
+    if [ -f "$CONFIG_FILE" ]; then
+        val=$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$CONFIG_FILE" | tail -1 \
+            | tr -d '\r' \
+            | sed -E "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//; s/[[:space:]]*(#.*)?\$//" \
+            | tr '[:upper:]' '[:lower:]')
+    fi
+    case "$val" in
+        off)                echo 0 ;;
+        ''|*[!0-9]*)        ;;
+        *)                  echo $((10#$val > 1440 ? 1440 : 10#$val)) ;;
+    esac
+}
+
 # Read the `fable_limit` option from the config file. Echoes one of: on|off.
 # Defaults to "on"; "off" skips the usage-endpoint request and the model row.
 read_fable_limit_setting() {
@@ -536,6 +554,13 @@ build_payload_for_token() {
     local chime chime_fragment=""
     chime=$(read_chime_setting)
     [ "$chime" = "on" ] && chime_fragment=",\"c\":1"
+    # Optional screensaver / screen-off timeouts ride along in the same
+    # fragment ("ss":N, "so":N).
+    local ss so
+    ss=$(read_minutes_setting screensaver)
+    so=$(read_minutes_setting screen_off)
+    [ -n "$ss" ] && chime_fragment="${chime_fragment},\"ss\":${ss}"
+    [ -n "$so" ] && chime_fragment="${chime_fragment},\"so\":${so}"
 
     local payload
     if [ -n "$s5h_util" ]; then

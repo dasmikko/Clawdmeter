@@ -3,6 +3,7 @@
 #include "claude_state.h"
 #include "now_playing.h"
 #include "idle.h"
+#include "idle_cfg.h"
 #include <lvgl.h>
 #include <time.h>
 #include "logo.h"
@@ -825,7 +826,44 @@ static void update_view_state(void) {
                       LV_OBJ_FLAG_HIDDEN);
 }
 
+// Burn-in saver: every PIXEL_SHIFT_MS step the static layers one position
+// around a small square orbit, at most PIXEL_SHIFT_PX from home. The splash is
+// left alone — it animates, and its opaque full-screen box would leave a
+// stripe if moved.
+static void tick_pixel_shift(void) {
+    if (PIXEL_SHIFT_PX <= 0) return;
+    static const int8_t ORBIT[][2] = {
+        {0, 0}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1}, {1, -1},
+    };
+    static const int ORBIT_N = sizeof(ORBIT) / sizeof(ORBIT[0]);
+    static uint32_t last_ms = 0;
+    static int idx = 0;
+    uint32_t now = lv_tick_get();
+    if (now - last_ms < PIXEL_SHIFT_MS) return;
+    last_ms = now;
+    idx = (idx + 1) % ORBIT_N;
+    const int dx = ORBIT[idx][0] * PIXEL_SHIFT_PX;
+    const int dy = ORBIT[idx][1] * PIXEL_SHIFT_PX;
+
+    lv_obj_t* scr = lv_screen_active();
+    const uint32_t n = lv_obj_get_child_count(scr);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t* child = lv_obj_get_child(scr, i);
+        if (child == splash_get_root()) continue;
+        lv_obj_set_style_translate_x(child, dx, 0);
+        lv_obj_set_style_translate_y(child, dy, 0);
+    }
+    // The now-playing toast lives on the top layer.
+    lv_obj_t* top = lv_layer_top();
+    const uint32_t tn = lv_obj_get_child_count(top);
+    for (uint32_t i = 0; i < tn; i++) {
+        lv_obj_set_style_translate_x(lv_obj_get_child(top, i), dx, 0);
+        lv_obj_set_style_translate_y(lv_obj_get_child(top, i), dy, 0);
+    }
+}
+
 void ui_tick_anim(void) {
+    tick_pixel_shift();
     now_playing_tick();
     if (current_screen != SCREEN_USAGE) return;
     update_view_state();
