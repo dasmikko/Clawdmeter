@@ -49,6 +49,11 @@ struct Layout {
     const lv_font_t* reset_font;     // "Resets in ..." line
     const lv_font_t* pace_font;      // enterprise "Under/On/Over pace" line
     const lv_font_t* anim_font;      // animated status line
+    // With a model-scoped weekly limit (e.g. Fable) the two panels tighten
+    // to make room for a slim third row: "pct  [bar]  (Model)".
+    int16_t mu_panel_h, mu_gap, mu_bar_y, mu_bar_h, mu_reset_y;
+    int16_t model_row_h;             // slim row height (pill + a little air)
+    int16_t model_pct_w;             // space reserved for the row's "100%"
     int16_t anim_y;                  // status line offset from bottom
     bool    small_icons;             // 40px logo + 24px battery (vs 80/48) on small screens
     int16_t title_nudge;             // title x-shift balancing the corner logo
@@ -113,6 +118,13 @@ static void compute_layout(const BoardCaps& c) {
         L.usage_panel_gap = 16;
         L.usage_bar_y = 56;
         L.usage_reset_y = 94;
+        L.mu_panel_h = 123;
+        L.mu_gap = 10;
+        L.mu_bar_y = 53;
+        L.mu_bar_h = 14;
+        L.mu_reset_y = 69;
+        L.model_row_h = 54;
+        L.model_pct_w = 76;
         L.bt_info_panel_h = 160;
         L.bt_reset_zone_h = 110;
         L.bt_title_font    = &font_tiempos_56;
@@ -127,6 +139,13 @@ static void compute_layout(const BoardCaps& c) {
         L.usage_panel_gap = 12;
         L.usage_bar_y = 48;
         L.usage_reset_y = 78;
+        L.mu_panel_h = 118;
+        L.mu_gap = 8;
+        L.mu_bar_y = 48;
+        L.mu_bar_h = 14;
+        L.mu_reset_y = 64;
+        L.model_row_h = 54;
+        L.model_pct_w = 76;
         L.bt_info_panel_h = 140;
         L.bt_reset_zone_h = 90;
         L.bt_title_font    = &font_tiempos_34;
@@ -145,6 +164,13 @@ static void compute_layout(const BoardCaps& c) {
         L.usage_panel_gap = 6;
         L.usage_bar_y = 30;
         L.usage_reset_y = 46;
+        L.mu_panel_h = 64;
+        L.mu_gap = 4;
+        L.mu_bar_y = 26;
+        L.mu_bar_h = 8;
+        L.mu_reset_y = 36;
+        L.model_row_h = 26;
+        L.model_pct_w = 44;
         L.bar_h = 12;
         L.panel_pad_x = 10;
         L.panel_pad_y = 6;
@@ -214,6 +240,13 @@ static lv_obj_t* lbl_weekly_label;
 static lv_obj_t* lbl_weekly_reset;
 static lv_obj_t* panel_session = nullptr;
 static lv_obj_t* panel_weekly = nullptr;
+// Model-scoped weekly limit row (e.g. Fable) — hidden unless the daemon sends "m"
+static lv_obj_t* panel_model = nullptr;
+static lv_obj_t* lbl_model_pct;
+static lv_obj_t* lbl_model_pill;
+static lv_obj_t* lbl_model_reset;   // short countdown ("4d 11h") left of the pill
+static lv_obj_t* bar_model;
+static int model_layout = -1;   // 1 = tightened 3-row layout applied, 0 = classic 2-panel
 // Enterprise-only widgets inside panel_session
 static lv_obj_t* lbl_session_pct_sym = nullptr;  // "%" in smaller font
 static lv_obj_t* lbl_spending_desc = nullptr;     // "of your monthly budget"
@@ -302,15 +335,16 @@ static lv_color_t pct_color(float pct) {
     return COL_GREEN;
 }
 
-static void format_reset_time(int mins, char* buf, size_t len) {
+static void format_reset_time(int mins, char* buf, size_t len,
+                              const char* prefix = "Resets in ") {
     if (mins < 0) {
         snprintf(buf, len, "---");
     } else if (mins < 60) {
-        snprintf(buf, len, "Resets in %dm", mins);
+        snprintf(buf, len, "%s%dm", prefix, mins);
     } else if (mins < 1440) {
-        snprintf(buf, len, "Resets in %dh %dm", mins / 60, mins % 60);
+        snprintf(buf, len, "%s%dh %dm", prefix, mins / 60, mins % 60);
     } else {
-        snprintf(buf, len, "Resets in %dd %dh", mins / 1440, (mins % 1440) / 60);
+        snprintf(buf, len, "%s%dd %dh", prefix, mins / 1440, (mins % 1440) / 60);
     }
 }
 
@@ -416,6 +450,36 @@ static lv_obj_t* make_usage_panel(lv_obj_t* parent, int y, const char* pill_text
     lv_obj_set_pos(*out_reset, 0, L.usage_reset_y);
 
     return panel;
+}
+
+// Switch the usage panels between the classic two-panel layout and the
+// tightened three-row one that makes room for the model row.
+static void apply_model_layout(bool with_model) {
+    if ((int)with_model == model_layout) return;
+    model_layout = with_model;
+    int16_t ph    = with_model ? L.mu_panel_h : L.usage_panel_h;
+    int16_t gap   = with_model ? L.mu_gap     : L.usage_panel_gap;
+    int16_t bar_y = with_model ? L.mu_bar_y   : L.usage_bar_y;
+    int16_t bar_h = with_model ? L.mu_bar_h   : L.bar_h;
+    int16_t rst_y = with_model ? L.mu_reset_y : L.usage_reset_y;
+    int16_t bar_w = L.content_w - 2 * L.panel_pad_x;
+
+    lv_obj_set_height(panel_session, ph);
+    lv_obj_set_y(panel_weekly, L.content_y + ph + gap);
+    lv_obj_set_height(panel_weekly, ph);
+    lv_obj_set_pos(bar_session, 0, bar_y);
+    lv_obj_set_pos(bar_weekly, 0, bar_y);
+    lv_obj_set_size(bar_session, bar_w, bar_h);
+    lv_obj_set_size(bar_weekly, bar_w, bar_h);
+    lv_obj_set_y(lbl_session_reset, rst_y);
+    lv_obj_set_y(lbl_weekly_reset, rst_y);
+
+    if (with_model) {
+        lv_obj_set_y(panel_model, L.content_y + 2 * (ph + gap));
+        lv_obj_clear_flag(panel_model, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(panel_model, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 // Pairing hint — shown when disconnected so the screen isn't empty and the
@@ -532,6 +596,25 @@ static void init_usage_screen(lv_obj_t* scr) {
                      &bar_weekly, &lbl_weekly_reset);
     // Recolor enabled so enterprise period box can color pace and reset separately
     lv_label_set_recolor(lbl_weekly_reset, true);
+
+    // Slim model row: percentage left, bar in the middle, then a short reset
+    // countdown and the model-name pill on the right. Hidden until "m" arrives.
+    panel_model = make_panel(usage_group, L.margin, 0, L.content_w, L.model_row_h);
+    lv_obj_set_style_pad_top(panel_model, 0, 0);
+    lv_obj_set_style_pad_bottom(panel_model, 0, 0);
+    lbl_model_pct = lv_label_create(panel_model);
+    lv_label_set_text(lbl_model_pct, "---%");
+    lv_obj_set_style_text_font(lbl_model_pct, L.reset_font, 0);
+    lv_obj_set_style_text_color(lbl_model_pct, COL_TEXT, 0);
+    lv_obj_align(lbl_model_pct, LV_ALIGN_LEFT_MID, 0, 0);
+    lbl_model_pill = make_pill(panel_model, "");
+    lv_obj_align(lbl_model_pill, LV_ALIGN_RIGHT_MID, 0, 0);
+    lbl_model_reset = lv_label_create(panel_model);
+    lv_label_set_text(lbl_model_reset, "");
+    lv_obj_set_style_text_font(lbl_model_reset, L.reset_font, 0);
+    lv_obj_set_style_text_color(lbl_model_reset, COL_DIM, 0);
+    bar_model = make_bar(panel_model, 0, 0, 10, L.mu_bar_h);
+    lv_obj_add_flag(panel_model, LV_OBJ_FLAG_HIDDEN);
 
     build_pair_group(usage_container);
     build_idle_group(usage_container);
@@ -678,6 +761,41 @@ void ui_update(const UsageData* data) {
         format_reset_time(data->weekly_reset_mins, buf, sizeof(buf));
         lv_label_set_text(lbl_weekly_reset, buf);
     }
+
+    // Model-scoped weekly limit (e.g. Fable). Enterprise accounts never get one.
+    bool with_model = !data->enterprise && data->model_name[0];
+    apply_model_layout(with_model);
+    if (with_model) {
+        int m_pct = (int)(data->model_pct + 0.5f);
+        lv_label_set_text_fmt(lbl_model_pct, "%d%%", m_pct);
+        lv_label_set_text(lbl_model_pill, data->model_name);
+        if (data->model_reset_mins >= 0) {
+            format_reset_time(data->model_reset_mins, buf, sizeof(buf), "");
+            lv_label_set_text(lbl_model_reset, buf);
+            lv_obj_clear_flag(lbl_model_reset, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_label_set_text(lbl_model_reset, "");
+            lv_obj_add_flag(lbl_model_reset, LV_OBJ_FLAG_HIDDEN);
+        }
+        // The pill and countdown widths follow their text; the bar fills what's left.
+        lv_obj_update_layout(panel_model);
+        int16_t pill_w = lv_obj_get_width(lbl_model_pill);
+        int16_t rst_w = data->model_reset_mins >= 0 ? lv_obj_get_width(lbl_model_reset) + L.panel_pad_x : 0;
+        lv_obj_align(lbl_model_reset, LV_ALIGN_RIGHT_MID, -(pill_w + L.panel_pad_x), 0);
+        int16_t inner_w = L.content_w - 2 * L.panel_pad_x;
+        int16_t bar_w = inner_w - L.model_pct_w - pill_w - rst_w - L.panel_pad_x;
+        // Too narrow for a readable bar (e.g. the 368/410-wide panels): the
+        // percentage and countdown carry the row on their own.
+        if (bar_w < 3 * L.model_pct_w / 4) {
+            lv_obj_add_flag(bar_model, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_clear_flag(bar_model, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_size(bar_model, bar_w, L.mu_bar_h);
+            lv_obj_align(bar_model, LV_ALIGN_LEFT_MID, L.model_pct_w, 0);
+        }
+        lv_bar_set_value(bar_model, m_pct, LV_ANIM_ON);
+        lv_obj_set_style_bg_color(bar_model, pct_color(data->model_pct), LV_PART_INDICATOR);
+    }
 }
 
 // Pick the usage-view sub-screen: pairing hint (BLE down), the idle "Zzz" screen
@@ -757,7 +875,7 @@ void ui_tick_anim(void) {
         text = "Connected";
     } else if (cs == CLAUDE_WAITING) {
         text = "Needs your input";
-        color = COL_TEXT;
+        color = COL_GREEN;
     } else if (cs == CLAUDE_IDLE) {
         text = "Ready";
         color = COL_DIM;

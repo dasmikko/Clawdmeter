@@ -141,14 +141,14 @@ read_heartbeat_interval() {
     fi
 }
 
-# Age a payload by $2 seconds: "sr"/"wr" reset countdowns (minutes) tick down
+# Age a payload by $2 seconds: "sr"/"wr"/"mr" reset countdowns (minutes) tick down
 # toward 0 and the optional clock epoch "t" advances. Everything else (usage %,
 # status, chime permission flag) is left as fetched. Echoes the adjusted JSON.
 age_payload() {
     python3 - "$1" "$2" <<'PYEOF'
 import json, sys
 d = json.loads(sys.argv[1]); secs = int(sys.argv[2]); mins = secs // 60
-for k in ("sr", "wr"):
+for k in ("sr", "wr", "mr"):
     if isinstance(d.get(k), int) and d[k] > 0:
         d[k] = max(d[k] - mins, 0)
 if isinstance(d.get("t"), int) and d["t"] > 0:
@@ -433,6 +433,42 @@ write_gatt() {
         WriteValue "aya{sv}" "$count" $bytes 0 2>/dev/null
 }
 
+# Model-scoped weekly limit (e.g. Fable) for one OAuth token, as a payload
+# fragment ',"m":"Fable","mp":61,"mr":6420' (reset in minutes; empty when the plan has none, or on any
+# failure). The unified rate-limit headers only carry the all-models 5h/7d
+# windows; per-model limits are only in the OAuth usage endpoint's "limits"
+# list, as kind "weekly_scoped" with a scope.model.display_name. When several
+# models are scoped, the fullest one wins.
+fetch_model_limit() {
+    local token="$1" body
+    body=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -s --max-time 10 -K - \
+        "https://api.anthropic.com/api/oauth/usage" \
+        -H "anthropic-beta: oauth-2025-04-20" \
+        -H "User-Agent: claude-code/2.1.5" 2>/dev/null) || return 0
+    python3 - "$body" <<'PYEOF' 2>/dev/null
+import json, sys, unicodedata
+from datetime import datetime, timezone
+best = None
+for lim in json.loads(sys.argv[1]).get("limits") or []:
+    model = ((lim.get("scope") or {}).get("model") or {})
+    name = model.get("display_name")
+    if lim.get("kind") != "weekly_scoped" or not name:
+        continue
+    pct = lim.get("percent") or 0
+    if best is None or pct > best[1]:
+        best = (name, pct, lim.get("resets_at"))
+if best:
+    # Device fonts are ASCII-only, and the firmware keeps 15 chars.
+    name = unicodedata.normalize("NFKD", best[0]).encode("ascii", "ignore").decode()[:15]
+    frag = ',"m":%s,"mp":%d' % (json.dumps(name), round(best[1]))
+    if best[2]:
+        secs = (datetime.fromisoformat(best[2]) - datetime.now(timezone.utc)).total_seconds()
+        frag += ',"mr":%d' % max(round(secs / 60), 0)
+    print(frag, end="")
+PYEOF
+    return 0
+}
+
 # Build the device payload for one OAuth token. Echoes the JSON payload on
 # success (empty + non-zero return on failure). Pure: no logging, no GATT write
 # — poll() owns picking the active plan and sending it.
@@ -496,13 +532,15 @@ build_payload_for_token() {
         s5h_util=${s5h_util:-0}; s5h_reset=${s5h_reset:-0}
         s7d_util=${s7d_util:-0}; s7d_reset=${s7d_reset:-0}
         s5h_status=${s5h_status:-unknown}
-        payload=$(awk -v u5="$s5h_util" -v r5="$s5h_reset" -v u7="$s7d_util" -v r7="$s7d_reset" -v st="$s5h_status" -v now="$now" -v clk="$clock_fragment" -v chm="$chime_fragment" \
+        local model_fragment
+        model_fragment=$(fetch_model_limit "$token")
+        payload=$(awk -v u5="$s5h_util" -v r5="$s5h_reset" -v u7="$s7d_util" -v r7="$s7d_reset" -v st="$s5h_status" -v now="$now" -v mdl="$model_fragment" -v clk="$clock_fragment" -v chm="$chime_fragment" \
             'BEGIN {
                 sp = sprintf("%.0f", u5 * 100);
                 sr = (r5 - now) / 60; sr = sr > 0 ? sprintf("%.0f", sr) : 0;
                 wp = sprintf("%.0f", u7 * 100);
                 wr = (r7 - now) / 60; wr = wr > 0 ? sprintf("%.0f", wr) : 0;
-                printf "{\"s\":%s,\"sr\":%s,\"w\":%s,\"wr\":%s,\"st\":\"%s\",\"acct\":\"pro\"%s%s,\"ok\":true}", sp, sr, wp, wr, st, clk, chm;
+                printf "{\"s\":%s,\"sr\":%s,\"w\":%s,\"wr\":%s%s,\"st\":\"%s\",\"acct\":\"pro\"%s%s,\"ok\":true}", sp, sr, wp, wr, mdl, st, clk, chm;
             }')
     else
         # Enterprise account — spending-limit model
