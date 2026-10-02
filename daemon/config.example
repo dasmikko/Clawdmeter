@@ -34,6 +34,18 @@
 #   off = silent (default)
 #   on  = chime through the board speaker (boards with audio: AMOLED-2.16 / 1.8)
 chime = off
+
+# Play the same chime when Claude Code is waiting for your input (a permission
+# prompt or a question). Needs the Claude Code hooks (see install.sh); Linux
+# daemon only.
+#   off = silent (default)
+#   on  = chime once per wait
+# waiting_chime = off
+#
+# Seconds Claude must have been waiting before the chime plays, so a prompt you
+# answer right away stays silent. 0 = chime immediately. Default 10, max 3600.
+# waiting_chime_delay = 10
+
 # Show a clock on the Usage screen, in place of the "Usage" title.
 #   off  = no clock; the screen keeps showing "Usage" (default)
 #   auto = show the clock, auto-detecting 12h/24h from this machine's settings

@@ -13,9 +13,11 @@ extract() { awk -v fn="$1" '$0 ~ "^"fn"\\(\\) \\{"{f=1} f{print} f&&/^\}/{exit}'
 eval "$(extract session_interrupted)"
 eval "$(extract read_claude_state)"
 eval "$(extract send_payload)"
+eval "$(extract read_waiting_chime_delay)"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+CONFIG_FILE="$TMP/config"
 export CLAWDMETER_STATE_DIR="$TMP/state"
 CLAUDE_STATE_DIR="$CLAWDMETER_STATE_DIR"
 CLAUDE_WORKING_STALE_S=900
@@ -86,8 +88,20 @@ hook s2 working
 send_payload '{"s":13,"ok":true}'
 check "payload gets cc"                    "$SENT" '{"s":13,"ok":true,"cc":"working"}'
 check "LAST_CC tracks what was sent"       "$LAST_CC" "working"
+check "waiting chime off by default"      "$(read_waiting_chime_delay)" ""
+printf 'waiting_chime = on\n' > "$CONFIG_FILE"
+check "waiting chime on -> default delay"  "$(read_waiting_chime_delay)" "10"
+printf 'waiting_chime = ON\nwaiting_chime_delay = 25  # s\n' > "$CONFIG_FILE"
+check "custom delay"                       "$(read_waiting_chime_delay)" "25"
+send_payload '{"s":13,"ok":true}'
+check "payload gets wc after cc"           "$SENT" '{"s":13,"ok":true,"cc":"working","wc":25}'
+printf 'waiting_chime = on\nwaiting_chime_delay = soon\n' > "$CONFIG_FILE"
+check "bad delay -> default"               "$(read_waiting_chime_delay)" "10"
+printf 'waiting_chime = off\nwaiting_chime_delay = 5\n' > "$CONFIG_FILE"
+check "waiting chime off -> no delay"      "$(read_waiting_chime_delay)" ""
+printf 'waiting_chime = on\n' > "$CONFIG_FILE"
 rm -rf "$CLAUDE_STATE_DIR"
 send_payload '{"s":13,"ok":true}'
-check "no hooks -> payload unchanged"      "$SENT" '{"s":13,"ok":true}'
+check "no hooks -> no cc, no wc"      "$SENT" '{"s":13,"ok":true}'
 
 exit $fail

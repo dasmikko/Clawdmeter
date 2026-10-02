@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 
 // What Claude Code is doing on the host, reported by the daemon as "cc" in the
 // usage payload (from Claude Code hooks, see daemon/claude-state-hook.sh).
@@ -18,3 +19,6 @@ bool claude_state_set_from_str(const char *s);
 
 // Current state; decays to UNKNOWN when no payload landed for a while.
 claude_state_t claude_state_get(void);
+
+// How long the state has been WAITING (ms since it entered it); 0 otherwise.
+uint32_t claude_state_waiting_ms(void);
