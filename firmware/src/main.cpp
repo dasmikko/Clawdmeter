@@ -120,6 +120,7 @@ static bool parse_json(const JsonDocument& doc, UsageData* out) {
     strlcpy(out->claude, doc["cc"] | "", sizeof(out->claude));
     out->screensaver_min = doc["ss"] | -1;
     out->screen_off_min = doc["so"] | -1;
+    out->waiting_chime_s = doc["wc"] | -1;   // absent (old daemon / off) → silent
     out->ok = doc["ok"] | false;
     out->valid = true;
     return true;
@@ -391,6 +392,20 @@ void loop() {
     }
 
     check_serial_cmd();
+
+    // Claude has been waiting on you for the daemon's `waiting_chime_delay`
+    // → chime once. Answering sooner leaves WAITING and cancels it.
+    {
+        static bool waiting_chimed = false;
+        if (claude_state_get() != CLAUDE_WAITING) {
+            waiting_chimed = false;
+        } else if (!waiting_chimed && usage.waiting_chime_s >= 0 &&
+                   claude_state_waiting_ms() >= (uint32_t)usage.waiting_chime_s * 1000UL) {
+            waiting_chimed = true;
+            Serial.println("claude waiting — chime");
+            sound_hal_play_reset();
+        }
+    }
 
     if (ble_has_data()) {
         JsonDocument doc;

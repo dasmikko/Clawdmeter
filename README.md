@@ -21,6 +21,9 @@ fields are only sent by the Linux bash daemon (`daemon/claude-usage-daemon.sh`).
   - *Waiting:* wakes the panel, cuts to waving / jumping / pointing, and shows a green "Needs your input".
   - *Idle:* the usual usage-rate splash and a still "✳ Ready".
   - Pressing Esc fires no hook, so the daemon also watches the session transcript for the interrupt entry.
+  - *Waiting chime:* with `waiting_chime = on`, the device chimes once after
+    Claude has waited `waiting_chime_delay` seconds (default 10). If you answer
+    sooner, it stays silent.
     Remove the hooks with `daemon/install-claude-hooks.py --remove`.
 - **Now playing.** `daemon/media_watch.py` follows the active MPRIS player
   through `playerctl` (Spotify, browsers, mpv, …). The device gets a **Music**
@@ -38,9 +41,9 @@ fields are only sent by the Linux bash daemon (`daemon/claude-usage-daemon.sh`).
   aren't dropped. On panels narrower than 480 px the corner mascot dances
   instead of typing, because its laptop overlapped the title.
 
-Both settings go in `~/.config/claude-usage-monitor/config`; see
+These settings go in `~/.config/claude-usage-monitor/config`; see
 [`daemon/config.example`](daemon/config.example). The payload fields this fork
-adds are `cc` (Claude state), `m` / `mp` / `mr` (Fable limit), and a separate
+adds are `cc` (Claude state), `wc` (waiting-chime delay), `m` / `mp` / `mr` (Fable limit), and a separate
 `{"np":{…}}` message (now playing).
 
 ---

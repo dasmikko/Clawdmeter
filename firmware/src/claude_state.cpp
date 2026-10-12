@@ -8,6 +8,7 @@
 
 static claude_state_t state = CLAUDE_UNKNOWN;
 static uint32_t set_ms = 0;
+static uint32_t waiting_since_ms = 0;
 
 claude_state_t claude_state_get(void) {
     if (state != CLAUDE_UNKNOWN && millis() - set_ms > CLAUDE_STATE_STALE_MS)
@@ -25,5 +26,11 @@ bool claude_state_set_from_str(const char *s) {
     const claude_state_t prev = claude_state_get();
     state = next;
     set_ms = millis();
+    if (next == CLAUDE_WAITING && prev != CLAUDE_WAITING) waiting_since_ms = set_ms;
     return next != prev;
+}
+
+uint32_t claude_state_waiting_ms(void) {
+    if (claude_state_get() != CLAUDE_WAITING) return 0;
+    return millis() - waiting_since_ms;
 }

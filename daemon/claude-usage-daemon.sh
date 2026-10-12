@@ -201,11 +201,16 @@ read_claude_state() {
     echo "$st"
 }
 
-# Write a payload to the device with the current Claude state appended.
+# Write a payload to the device with the current Claude state appended, plus
+# "wc" (waiting-chime delay in seconds) when the waiting chime is on.
 send_payload() {
-    local payload="$1" cc
+    local payload="$1" cc wc
     cc=$(read_claude_state)
-    [ -n "$cc" ] && payload="${payload%\}},\"cc\":\"$cc\"}"
+    if [ -n "$cc" ]; then
+        payload="${payload%\}},\"cc\":\"$cc\"}"
+        wc=$(read_waiting_chime_delay)
+        [ -n "$wc" ] && payload="${payload%\}},\"wc\":$wc}"
+    fi
     write_gatt "$RX_CHAR_PATH" "$payload" || return 1
     LAST_CC="$cc"
     LAST_WRITE_TS=$(date +%s)
@@ -258,6 +263,28 @@ read_minutes_setting() {
         ''|*[!0-9]*)        ;;
         *)                  echo $((10#$val > 1440 ? 1440 : 10#$val)) ;;
     esac
+}
+
+# Read the `waiting_chime` / `waiting_chime_delay` options. Echoes the delay in
+# seconds (0-3600, default 10) when the chime is on, nothing when it's off
+# (the default). The device chimes once when Claude has waited that long.
+read_waiting_chime_delay() {
+    local on="" delay=""
+    if [ -f "$CONFIG_FILE" ]; then
+        on=$(grep -E '^[[:space:]]*waiting_chime[[:space:]]*=' "$CONFIG_FILE" | tail -1 \
+            | tr -d '\r' \
+            | sed -E 's/^[[:space:]]*waiting_chime[[:space:]]*=[[:space:]]*//; s/[[:space:]]*(#.*)?$//' \
+            | tr '[:upper:]' '[:lower:]')
+        delay=$(grep -E '^[[:space:]]*waiting_chime_delay[[:space:]]*=' "$CONFIG_FILE" | tail -1 \
+            | tr -d '\r' \
+            | sed -E 's/^[[:space:]]*waiting_chime_delay[[:space:]]*=[[:space:]]*//; s/[[:space:]]*(#.*)?$//')
+    fi
+    [ "$on" = "on" ] || return 0
+    if [[ "$delay" =~ ^[0-9]+$ ]] && (( 10#$delay <= 3600 )); then
+        echo $(( 10#$delay ))
+    else
+        echo 10
+    fi
 }
 
 # Read the `fable_limit` option from the config file. Echoes one of: on|off.

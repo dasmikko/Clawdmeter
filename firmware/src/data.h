@@ -20,6 +20,7 @@ struct UsageData {
     int  screen_off_min;     // black after N quiet minutes; 0 = never on USB; -1 = not sent
     int  screensaver_min;    // splash after N quiet minutes; 0 = off; -1 = not sent (keep default)
     char claude[12];         // Claude Code state "idle"/"working"/"waiting"; "" = not sent
+    int  waiting_chime_s;    // chime after Claude has waited this many seconds; -1 = off
     bool ok;                 // data parse succeeded
     bool valid;              // false until first successful parse
 };
